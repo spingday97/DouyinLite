@@ -9,7 +9,6 @@
     }
   }
 
-  // Hook fetch
   var origFetch = window.fetch;
   if (origFetch) {
     window.fetch = function () {
@@ -28,7 +27,6 @@
     };
   }
 
-  // Hook XMLHttpRequest
   var origOpen = XMLHttpRequest.prototype.open;
   var origSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (m, url) {
@@ -55,6 +53,16 @@
     } catch (e) {}
   };
 
+  window.__dylSwitchTab = function (tab) {
+    if (tab === 'friend') {
+      fetch('/aweme/v1/web/familiar/feed/?device_platform=webapp&aid=6383&count=12', {
+        credentials: 'include'
+      }).then(function (r) { return r.text(); }).then(function (txt) {
+        forwardIfFeed(txt, true);
+      }).catch(function () {});
+    }
+  };
+
   window.__dylFetchComments = function (awemeId) {
     fetch('/aweme/v1/web/comment/list/?device_platform=webapp&aid=6383&aweme_id=' + encodeURIComponent(awemeId) + '&cursor=0&count=20', {
       credentials: 'include'
@@ -67,6 +75,13 @@
 
   window.__dylDigg = function (awemeId, type) {
     fetch('/aweme/v1/web/commit/item/digg/?device_platform=webapp&aid=6383&aweme_id=' + encodeURIComponent(awemeId) + '&type=' + type, {
+      method: 'POST',
+      credentials: 'include'
+    }).catch(function () {});
+  };
+
+  window.__dylCollect = function (awemeId, action) {
+    fetch('/aweme/v1/web/aweme/collect/?device_platform=webapp&aid=6383&aweme_id=' + encodeURIComponent(awemeId) + '&action=' + action, {
       method: 'POST',
       credentials: 'include'
     }).catch(function () {});
