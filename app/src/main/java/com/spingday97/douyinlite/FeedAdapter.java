@@ -493,7 +493,7 @@ void onSeekPercent(float percent);
                     conn.connect();
                     if (conn.getResponseCode() == HttpURLConnection.HTTP_OK) {
                         try (InputStream is = conn.getInputStream()) {
-                            bmp = BitmapFactory.decodeStream(is)
+                            bmp = BitmapFactory.decodeStream(is);
                             if (bmp != null) IMG_CACHE.put(url, bmp);;
                         }
                     }
