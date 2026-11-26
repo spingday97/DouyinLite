@@ -1,31 +1,31 @@
 (function () {
   if (window.__douyinLiteBridgeLoaded) return;
   window.__douyinLiteBridgeLoaded = true;
-
+  function dbg(msg) { try { if (window.DouyinLiteBridge && DouyinLiteBridge.onDebugLog) DouyinLiteBridge.onDebugLog(String(msg)); } catch (e) {} }
+  dbg('init');
+  
   function isFeedUrl(url) {
     if (!url) return false;
-    return (
-      url.indexOf('/aweme/v1/web/tab/feed') !== -1 ||
-      url.indexOf('/aweme/v1/web/familiar/feed') !== -1 ||
-      url.indexOf('/aweme/v1/web/follow/feed') !== -1 ||
-      url.indexOf('/aweme/v1/web/search/item') !== -1
-    );
+      if (url.indexOf('/aweme/v1/') === -1 && url.indexOf('/aweme/v2/') === -1) return false;
+    var excludes = ['/comment/', '/digg/', '/collect/', '/follow/', '/favorite/', '/listcollection/', '/aweme/post', '/user/'];
+    for (var i = 0; i < excludes.length; i++) { if (url.indexOf(excludes[i]) !== -1) return false; }
+    return true;
   }
 
   function forwardIfFeed(text, replace) {
-    if (!text || text.indexOf('"aweme_list"') === -1) return;
+    if (!text || (text.indexOf('"aweme_list"') === -1 && text.indexOf('"aweme_info"') === -1)) return;
     if (window.DouyinLiteBridge && DouyinLiteBridge.onFeedJson) {
       DouyinLiteBridge.onFeedJson(text, !!replace);
     }
   }
 
   function tryExtractSsr() {
-    try {
+    try { dbg('tryExtractSsr');
       var el = document.getElementById('RENDER_DATA');
       if (el && el.textContent) {
         var decoded = decodeURIComponent(el.textContent);
         forwardIfFeed(decoded, false);
-      }
+      } if (typeof self !== 'undefined' && self.__pace_f) { var paceStr = JSON.stringify(self.__pace_f); dbg('pace_f len=' + paceStr.length); if (paceStr.indexOf('aweme_list') !== -1) forwardIfFeed(paceStr, false); }
     } catch (e) {}
   }
   window.__dylTrySsr = tryExtractSsr;
@@ -42,9 +42,9 @@
       var url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
       return origFetch.apply(this, args).then(function (resp) {
         try {
-          if (isFeedUrl(url)) {
+          if url.indexOf('/aweme/') !== -1 || (isFeedUrl(url)) {
             resp.clone().text().then(function (txt) {
-              forwardIfFeed(txt, url.indexOf('/search/') !== -1);
+              if (url.indexOf('/aweme/') !== -1) dbg('fetch ' + url + ' status=' + resp.status + ' len=' + (txt ? txt.length : 0)); if (isFeedUrl(url)) forwardIfFeed(txt, url.indexOf('/search/') !== -1);
             });
           }
         } catch (e) {}
@@ -62,8 +62,8 @@
   XMLHttpRequest.prototype.send = function () {
     this.addEventListener('load', function () {
       try {
-        var u = this.__dylUrl || '';
-        if (isFeedUrl(u) && typeof this.responseText === 'string') {
+        var u = this.__dylUrl || ''; if (u.indexOf('/aweme/') !== -1) dbg('xhr ' + u + ' status=' + this.status + ' len=' + (typeof this.responseText === 'string' ? this.responseText.length : 0));
+        if (isFeedUrl(u) && typeof t;his.responseText === 'string') {
           forwardIfFeed(this.responseText, u.indexOf('/search/') !== -1);
         }
       } catch (e) {}
