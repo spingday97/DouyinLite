@@ -10,12 +10,16 @@ public class VideoItem {
     public String awemeId = "";
     public String desc = "";
     public String authorName = "";
+    public String authorUid = "";
     public String musicTitle = "";
     public String videoUrl = "";
     public String audioUrl = "";
     public long diggCount = 0;
     public long commentCount = 0;
+    public long collectCount = 0;
     public boolean isDigged = false;
+    public boolean isCollected = false;
+    public boolean isFollowed = false;
 
     public static List<VideoItem> parseFeedJson(String jsonStr) {
         List<VideoItem> list = new ArrayList<>();
@@ -39,16 +43,20 @@ public class VideoItem {
                 item.awemeId = obj.optString("aweme_id", "");
                 item.desc = obj.optString("desc", "");
                 item.isDigged = obj.optInt("user_digged", 0) == 1;
+                item.isCollected = obj.optInt("collect_stat", 0) == 1;
 
                 JSONObject author = obj.optJSONObject("author");
                 if (author != null) {
                     item.authorName = author.optString("nickname", "");
+                    item.authorUid = author.optString("uid", "");
+                    item.isFollowed = author.optInt("follow_status", 0) > 0;
                 }
 
                 JSONObject stats = obj.optJSONObject("statistics");
                 if (stats != null) {
                     item.diggCount = stats.optLong("digg_count", 0);
                     item.commentCount = stats.optLong("comment_count", 0);
+                    item.collectCount = stats.optLong("collect_count", 0);
                 }
 
                 JSONObject playAddr = video.optJSONObject("play_addr");
