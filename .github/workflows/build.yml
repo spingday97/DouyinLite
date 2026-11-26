@@ -16,10 +16,38 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.7'
-      - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Cache Persistent Release Keystore
+        uses: actions/cache@v4
+        with:
+          path: .keystore/release.jks
+          key: douyinlite-release-keystore-v1
+      - name: Prepare Signing Keystore
+        env:
+          SIGN_KEYSTORE_BASE64: ${{ secrets.SIGN_KEYSTORE_BASE64 }}
+          KEY_ALIAS_SEC: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASSWORD_SEC: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD_SEC: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$SIGN_KEYSTORE_BASE64" ]; then
+            echo "$SIGN_KEYSTORE_BASE64" | base64 -d > release.jks
+            echo "SIGN_KEYSTORE_PATH=$PWD/release.jks" >> $GITHUB_ENV
+            echo "KEY_ALIAS=$KEY_ALIAS_SEC" >> $GITHUB_ENV
+            echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD_SEC" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=$KEY_PASSWORD_SEC" >> $GITHUB_ENV
+          else
+            mkdir -p .keystore
+            if [ ! -f .keystore/release.jks ]; then
+              keytool -genkeypair -v -keystore .keystore/release.jks -alias douyinlite -keyalg RSA -keysize 2048 -validity 10000 -storepass DouyinLite2026 -keypass DouyinLite2026 -dname "CN=DouyinLite, OU=Mobile, O=spingday97, L=Shanghai, S=Shanghai, C=CN"
+            fi
+            echo "SIGN_KEYSTORE_PATH=$PWD/.keystore/release.jks" >> $GITHUB_ENV
+            echo "KEY_ALIAS=douyinlite" >> $GITHUB_ENV
+            echo "KEYSTORE_PASSWORD=DouyinLite2026" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=DouyinLite2026" >> $GITHUB_ENV
+          fi
+      - name: Build Release APK
+        run: gradle assembleRelease --no-daemon
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: DouyinLite-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/release/*.apk
