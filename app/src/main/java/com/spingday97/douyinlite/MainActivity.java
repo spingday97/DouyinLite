@@ -72,7 +72,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
     private boolean autoNext = false;
     private float speed = 1.0f;
     private long lastBackMs = 0L;
-
+    private LinearLayout emptyPanel; private TextView emptyStatusTv; private final StringBuilder debugLogs = new StringBuilder();
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable progressTick = new Runnable() {
         @Override
@@ -216,7 +216,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         }
         mainCol.addView(bottomBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
+        emptyPanel = new LinearLayout(this); emptyPanel.setOrientation(LinearLayout.VERTICAL); emptyPanel.setGravity(Gravity.CENTER); emptyPanel.setPadding(dp(24), dp(24), dp(24), dp(24)); emptyStatusTv = new TextView(this); emptyStatusTv.setText("正在加载抖音推荐流..."); emptyStatusTv.setTextColor(Color.WHITE); emptyStatusTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15); emptyStatusTv.setGravity(Gravity.CENTER); emptyPanel.addView(emptyStatusTv); TextView openWebBtn = new TextView(this); openWebBtn.setText("打开网页 / 登录 / 过验证"); openWebBtn.setTextColor(Color.WHITE); openWebBtn.setBackgroundColor(Color.argb(180, 254, 44, 85)); openWebBtn.setPadding(dp(16), dp(10), dp(16), dp(10)); openWebBtn.setGravity(Gravity.CENTER); LinearLayout.LayoutParams openLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT); openLp.topMargin = dp(16); openWebBtn.setOnClickListener(v -> toggleWebLogin(true)); emptyPanel.addView(openWebBtn, openLp); TextView viewLogBtn = new TextView(this); viewLogBtn.setText("查看抓包日志"); viewLogBtn.setTextColor(Color.WHITE); viewLogBtn.setBackgroundColor(Color.argb(140, 60, 60, 60)); viewLogBtn.setPadding(dp(16), dp(10), dp(16), dp(10)); viewLogBtn.setGravity(Gravity.CENTER); LinearLayout.LayoutParams logLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT); logLp.topMargin = dp(12); viewLogBtn.setOnClickListener(v -> { String curUrl = bridgeWebView != null ? String.valueOf(bridgeWebView.getUrl()) : ""; String logs; synchronized (debugLogs) { logs = debugLogs.toString(); } new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle("抓包日志").setMessage("URL: " + curUrl + "\n\n" + logs).setPositiveButton("关闭", null).show(); }); emptyPanel.addView(viewLogBtn, logLp); FrameLayout.LayoutParams emptyLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT); emptyLp.gravity = Gravity.CENTER; feedArea.addView(emptyPanel, emptyLp);
         // 5. WebView bridge + Login modal overlay
         webContainer = new FrameLayout(this);
         webContainer.setBackgroundColor(Color.BLACK);
@@ -234,12 +234,12 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(true);
-        s.setUserAgentString(MediaDownloadHelper.DESKTOP_UA);
+        s.setUserAgentString(MediaDownloadHelper.DESKTOP_UA); s.setUseWideViewPort(true); s.setLoadWithOverviewMode(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
         cachedJs = readAsset("douyin_lite.js");
         bridgeWebView.addJavascriptInterface(new Bridge(), "DouyinLiteBridge");
-        bridgeWebView.setWebChromeClient(new WebChromeClient());
+        bridgeWebView.setWebChromeClient(new WebChromeClient() { @Override public void onProgressChanged(WebView view, int newProgress) { super.onProgressChanged(view, newProgress); if (newProgress >= 10 && cachedJs != null) { view.evaluateJavascript(cachedJs, null); } } }));
         bridgeWebView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -247,10 +247,10 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
                 return !(url.startsWith("http://") || url.startsWith("https://"));
             }
 
-                       @Override public void onPageStarted(WebView view, String url, Bitmap favicon) { super.onPageStarted(view, url, favicon); if (cachedJs != null && !cachedJs.isEmpty()) { view.evaluateJavascript(cachedJs, null); } }
+                       @Override public void onPageStarted(WebView view, String url, Bitmap favicon) { super.onPageStarted(view, url, favicon); appendDebugLog("onPageStarted: " + url); if (cachedJs != null && !cachedJs.isEmpty()) { view.evaluateJavascript(cachedJs, null); } }
             @Override
             public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
+                super.onPageFinished(view, url); appendDebugLog("onPageFinished: " + url);
                 CookieManager.getInstance().flush();
                 if (cachedJs != null && !cachedJs.isEmpty()) {
                     view.evaluateJavascript(cachedJs, null);
@@ -259,7 +259,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         });
         webContainer.addView(bridgeWebView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
+        LinearLayout webTopBar = new LinearLayout(this); webTopBar.setOrientation(LinearLayout.HORIZONTAL); webTopBar.setGravity(Gravity.CENTER_VERTICAL); webTopBar.setBackgroundColor(Color.argb(160, 0, 0, 0)); webTopBar.setPadding(dp(12), dp(8), dp(12), dp(8)); TextView backPlayerBtn = new TextView(this); backPlayerBtn.setText("返回播放器"); backPlayerBtn.setTextColor(Color.WHITE); backPlayerBtn.setPadding(dp(10), dp(6), dp(10), dp(6)); backPlayerBtn.setOnClickListener(v -> toggleWebLogin(false)); webTopBar.addView(backPlayerBtn); TextView reloadWebBtn = new TextView(this); reloadWebBtn.setText("刷新"); reloadWebBtn.setTextColor(Color.WHITE); reloadWebBtn.setPadding(dp(14), dp(6), dp(10), dp(6)); reloadWebBtn.setOnClickListener(v -> { if (bridgeWebView != null) bridgeWebView.reload(); }); webTopBar.addView(reloadWebBtn); FrameLayout.LayoutParams webTopLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); webTopLp.gravity = Gravity.TOP; webContainer.addView(webTopBar, webTopLp);
         TextView closeWeb = new TextView(this);
         closeWeb.setText("✕ 完成并返回");
         closeWeb.setTextColor(Color.WHITE);
@@ -497,7 +497,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
             return sb.toString();
         } catch (Exception e) {
             return "";
-        }
+        }    private void appendDebugLog(String msg) { synchronized (debugLogs) { debugLogs.append(msg).append('\n'); if (debugLogs.length() > 4000) debugLogs.delete(0, debugLogs.length() - 4000); } }
     }
 
     private int dp(int val) {
@@ -536,8 +536,8 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         @JavascriptInterface
         public void onFeedJson(String json, boolean replace) {
             List<VideoItem> parsed = VideoItem.parseFeedJson(json);
-            if (parsed.isEmpty()) return;
-            runOnUiThread(() -> {
+            if (parsed.isEmpty()) return; appendDebugLog("parsed=" + parsed.size());
+            runOnUiThread(() -> { if (emptyPanel != null) emptyPanel.setVisibility(View.GONE);
                 boolean wasEmpty = adapter.getItemCount() == 0;
                 if (replace) {
                     adapter.replaceItems(parsed);
@@ -551,7 +551,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
                 }
             });
         }
-
+        @JavascriptInterface public void onDebugLog(String msg) { appendDebugLog(msg); }
         @JavascriptInterface
         public void onCommentsJson(String json) {
             runOnUiThread(() -> {
