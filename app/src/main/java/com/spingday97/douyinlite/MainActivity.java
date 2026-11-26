@@ -3,9 +3,15 @@ package com.spingday97.douyinlite;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -47,18 +53,43 @@ import java.util.Map;
 
 @UnstableApi
 public class MainActivity extends Activity implements FeedAdapter.ActionListener {
+    private static final String DOUYIN_HOME = "https://www.douyin.com/";
+
     private ViewPager2 viewPager;
     private FeedAdapter adapter;
     private ExoPlayer player;
     private WebView bridgeWebView;
     private FrameLayout webContainer;
-    private TextView statusBanner;
+
+    private TextView tabFollow, tabFriend, tabRecommend;
+    private TextView navHome, navFriend, navMe;
+    private int activeTopTab = 2; // 0=关注, 1=朋友, 2=推荐
 
     private String cachedJs;
     private int currentPos = 0;
     private boolean cleanScreen = false;
+    private boolean autoNext = false;
     private float speed = 1.0f;
     private long lastBackMs = 0L;
+
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable progressTick = new Runnable() {
+        @Override
+        public void run() {
+            if (player != null && player.isPlaying()) {
+                long dur = player.getDuration();
+                long pos = player.getCurrentPosition();
+                if (dur > 0) {
+                    RecyclerView rv = (RecyclerView) viewPager.getChildAt(0);
+                    RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(currentPos);
+                    if (vh instanceof FeedAdapter.VH holder) {
+                        holder.progressBar.setProgress((int) (pos * 1000L / dur));
+                    }
+                }
+            }
+            uiHandler.postDelayed(this, 300);
+        }
+    };
 
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     @Override
@@ -70,14 +101,19 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         w.setStatusBarColor(Color.BLACK);
         w.setNavigationBarColor(Color.BLACK);
 
-        FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
-        setContentView(root);
+        LinearLayout mainCol = new LinearLayout(this);
+        mainCol.setOrientation(LinearLayout.VERTICAL);
+        mainCol.setBackgroundColor(Color.BLACK);
+        setContentView(mainCol);
 
-        // 1. Native ExoPlayer with Douyin headers
+        FrameLayout feedArea = new FrameLayout(this);
+        mainCol.addView(feedArea, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // 1. Native ExoPlayer
         Map<String, String> headers = new HashMap<>();
         headers.put("User-Agent", MediaDownloadHelper.DESKTOP_UA);
-        headers.put("Referer", "https://www.douyin.com/");
+        headers.put("Referer", DOUYIN_HOME);
         DefaultHttpDataSource.Factory dsFactory = new DefaultHttpDataSource.Factory()
                 .setDefaultRequestProperties(headers)
                 .setAllowCrossProtocolRedirects(true);
@@ -85,8 +121,19 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(dsFactory))
                 .build();
         player.setRepeatMode(Player.REPEAT_MODE_ONE);
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int state) {
+                if (state == Player.STATE_ENDED && autoNext) {
+                    int next = currentPos + 1;
+                    if (next < adapter.getItemCount()) {
+                        viewPager.setCurrentItem(next, true);
+                    }
+                }
+            }
+        });
 
-        // 2. Native vertical ViewPager2
+        // 2. Vertical ViewPager2
         viewPager = new ViewPager2(this);
         viewPager.setOrientation(ViewPager2.ORIENTATION_VERTICAL);
         adapter = new FeedAdapter(this);
@@ -101,42 +148,79 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
                 }
             }
         });
-        root.addView(viewPager, new FrameLayout.LayoutParams(
+        feedArea.addView(viewPager, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // 3. Top minimal overlay bar
+        // 3. Douyin Top Bar (Refresh | 关注 朋友 推荐 | Search)
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
-        int p = dp(12);
-        topBar.setPadding(p, dp(32), p, dp(8));
+        topBar.setPadding(dp(14), dp(30), dp(14), dp(10));
 
-        statusBanner = makeTopPill("正在连接精选流...");
-        TextView btnSearch = makeTopPill("🔍 搜索");
-        TextView btnRefresh = makeTopPill("↻ 刷新");
-        TextView btnLogin = makeTopPill("👤 登录/验证");
-
-        btnSearch.setOnClickListener(v -> showSearchDialog());
+        TextView btnRefresh = makeTopIcon("↻");
         btnRefresh.setOnClickListener(v -> {
-            statusBanner.setText("刷新中...");
-            bridgeWebView.loadUrl("https://www.douyin.com/jingxuan");
+            Toast.makeText(this, "正在刷新推荐流...", Toast.LENGTH_SHORT).show();
+            bridgeWebView.loadUrl(DOUYIN_HOME);
         });
-        btnLogin.setOnClickListener(v -> toggleWebLogin(true));
 
-        topBar.addView(statusBanner);
-        View spacer = new View(this);
-        topBar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
-        topBar.addView(btnSearch);
+        tabFollow = makeTopTab("关注");
+        tabFriend = makeTopTab("朋友");
+        tabRecommend = makeTopTab("推荐");
+        tabFollow.setOnClickListener(v -> switchFeedTab(0));
+        tabFriend.setOnClickListener(v -> switchFeedTab(1));
+        tabRecommend.setOnClickListener(v -> switchFeedTab(2));
+        updateTopTabs();
+
+        TextView btnSearch = makeTopIcon("🔍");
+        btnSearch.setOnClickListener(v -> showSearchDialog());
+
         topBar.addView(btnRefresh);
-        topBar.addView(btnLogin);
-        root.addView(topBar, new FrameLayout.LayoutParams(
+        View sp1 = new View(this);
+        topBar.addView(sp1, new LinearLayout.LayoutParams(0, 1, 1f));
+        topBar.addView(tabFollow);
+        topBar.addView(tabFriend);
+        topBar.addView(tabRecommend);
+        View sp2 = new View(this);
+        topBar.addView(sp2, new LinearLayout.LayoutParams(0, 1, 1f));
+        topBar.addView(btnSearch);
+
+        feedArea.addView(topBar, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
 
-        // 4. WebView bridge + Login modal container
+        // 4. Douyin Bottom Navigation Bar (首页 | 朋友 | ⊕ | 登录 | 我)
+        LinearLayout bottomBar = new LinearLayout(this);
+        bottomBar.setOrientation(LinearLayout.HORIZONTAL);
+        bottomBar.setBackgroundColor(Color.BLACK);
+        bottomBar.setGravity(Gravity.CENTER_VERTICAL);
+        bottomBar.setPadding(0, dp(8), 0, dp(14));
+
+        navHome = makeBottomNav("首页", true);
+        navFriend = makeBottomNav("朋友", false);
+        TextView navPlus = makeBottomNav("⊕", false);
+        navPlus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        TextView navMsg = makeBottomNav("刷新", false);
+        navMe = makeBottomNav("我", false);
+
+        navHome.setOnClickListener(v -> switchFeedTab(2));
+        navFriend.setOnClickListener(v -> switchFeedTab(1));
+        navPlus.setOnClickListener(v -> bridgeWebView.evaluateJavascript("window.__dylLoadMore && window.__dylLoadMore()", null));
+        navMsg.setOnClickListener(v -> {
+            Toast.makeText(this, "加载新推荐...", Toast.LENGTH_SHORT).show();
+            bridgeWebView.loadUrl(DOUYIN_HOME);
+        });
+        navMe.setOnClickListener(v -> toggleWebLogin(true));
+
+        for (TextView tv : new TextView[]{navHome, navFriend, navPlus, navMsg, navMe}) {
+            bottomBar.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        mainCol.addView(bottomBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 5. WebView bridge + Login modal overlay
         webContainer = new FrameLayout(this);
         webContainer.setBackgroundColor(Color.BLACK);
         webContainer.setVisibility(View.INVISIBLE);
-        root.addView(webContainer, new FrameLayout.LayoutParams(
+        feedArea.addView(webContainer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         bridgeWebView = new WebView(this);
@@ -174,14 +258,49 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         webContainer.addView(bridgeWebView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        TextView closeWeb = makeTopPill("✕ 返回播放器");
+        TextView closeWeb = new TextView(this);
+        closeWeb.setText("✕ 完成并返回");
+        closeWeb.setTextColor(Color.WHITE);
+        closeWeb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        GradientDrawable cBg = new GradientDrawable();
+        cBg.setColor(Color.argb(180, 254, 44, 85));
+        cBg.setCornerRadius(dp(16));
+        closeWeb.setBackground(cBg);
+        closeWeb.setPadding(dp(12), dp(6), dp(12), dp(6));
         closeWeb.setOnClickListener(v -> toggleWebLogin(false));
         FrameLayout.LayoutParams closeLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-        closeLp.setMargins(0, dp(36), dp(14), 0);
+        closeLp.setMargins(0, dp(34), dp(14), 0);
         webContainer.addView(closeWeb, closeLp);
 
-        bridgeWebView.loadUrl("https://www.douyin.com/jingxuan");
+        bridgeWebView.loadUrl(DOUYIN_HOME);
+        uiHandler.postDelayed(progressTick, 300);
+    }
+
+    private void switchFeedTab(int tab) {
+        activeTopTab = tab;
+        updateTopTabs();
+        if (tab == 0) {
+            bridgeWebView.loadUrl("https://www.douyin.com/follow");
+        } else if (tab == 1) {
+            bridgeWebView.evaluateJavascript("window.__dylSwitchTab && window.__dylSwitchTab('friend')", null);
+        } else {
+            bridgeWebView.loadUrl(DOUYIN_HOME);
+        }
+    }
+
+    private void updateTopTabs() {
+        TextView[] tabs = {tabFollow, tabFriend, tabRecommend};
+        for (int i = 0; i < tabs.length; i++) {
+            boolean active = (i == activeTopTab);
+            tabs[i].setTextColor(active ? Color.WHITE : Color.argb(165, 255, 255, 255));
+            tabs[i].setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            tabs[i].setTextSize(TypedValue.COMPLEX_UNIT_SP, active ? 17 : 15.5f);
+        }
+        if (navHome != null && navFriend != null) {
+            navHome.setTextColor(activeTopTab == 2 ? Color.WHITE : Color.argb(150, 255, 255, 255));
+            navFriend.setTextColor(activeTopTab == 1 ? Color.WHITE : Color.argb(150, 255, 255, 255));
+        }
     }
 
     private void toggleWebLogin(boolean show) {
@@ -191,7 +310,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         } else {
             CookieManager.getInstance().flush();
             if (adapter.getItemCount() == 0) {
-                bridgeWebView.reload();
+                bridgeWebView.loadUrl(DOUYIN_HOME);
             } else {
                 player.play();
             }
@@ -209,6 +328,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         }
         player.setMediaItem(MediaItem.fromUri(item.videoUrl));
         player.setPlaybackSpeed(speed);
+        player.setRepeatMode(autoNext ? Player.REPEAT_MODE_OFF : Player.REPEAT_MODE_ONE);
         player.prepare();
         player.play();
     }
@@ -231,21 +351,82 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
     }
 
     @Override
-    public void onCycleSpeed() {
+    public void onLike(VideoItem item, int pos) {
+        item.isDigged = !item.isDigged;
+        item.diggCount += item.isDigged ? 1 : -1;
+        adapter.notifyItemChanged(pos);
+        bridgeWebView.evaluateJavascript(
+                "window.__dylDigg && window.__dylDigg('" + item.awemeId + "'," + (item.isDigged ? 1 : 0) + ")", null);
+    }
+
+    @Override
+    public void onCollect(VideoItem item, int pos) {
+        item.isCollected = !item.isCollected;
+        item.collectCount += item.isCollected ? 1 : -1;
+        adapter.notifyItemChanged(pos);
+        bridgeWebView.evaluateJavascript(
+                "window.__dylCollect && window.__dylCollect('" + item.awemeId + "'," + (item.isCollected ? 1 : 0) + ")", null);
+    }
+
+    @Override
+    public void onOpenComments(VideoItem item) {
+        if (item.awemeId.isEmpty()) return;
+        Toast.makeText(this, "加载评论中...", Toast.LENGTH_SHORT).show();
+        bridgeWebView.evaluateJavascript(
+                "window.__dylFetchComments && window.__dylFetchComments('" + item.awemeId + "')", null);
+    }
+
+    @Override
+    public void onOpenMoreSheet(VideoItem item) {
+        String[] options = {
+                "⬇ 保存视频到本地",
+                "🎵 提取独立音频",
+                "🔗 复制视频直链",
+                "⚡ 倍速切换 (当前 " + speed + "x)",
+                cleanScreen ? "👁 退出清屏" : "👁 清屏模式",
+                autoNext ? "🔁 自动连播: 开" : "🔁 自动连播: 关",
+                "👤 打开网页登录/验证"
+        };
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("更多功能")
+                .setItems(options, (d, which) -> {
+                    switch (which) {
+                        case 0 -> downloadVideo(item);
+                        case 1 -> downloadAudio(item);
+                        case 2 -> copyText(item.videoUrl);
+                        case 3 -> cycleSpeed();
+                        case 4 -> onToggleCleanScreen();
+                        case 5 -> {
+                            autoNext = !autoNext;
+                            player.setRepeatMode(autoNext ? Player.REPEAT_MODE_OFF : Player.REPEAT_MODE_ONE);
+                            Toast.makeText(this, "自动连播: " + (autoNext ? "开" : "关"), Toast.LENGTH_SHORT).show();
+                        }
+                        case 6 -> toggleWebLogin(true);
+                    }
+                })
+                .show();
+    }
+
+    private void cycleSpeed() {
         if (speed == 1.0f) speed = 1.25f;
         else if (speed == 1.25f) speed = 1.5f;
         else if (speed == 1.5f) speed = 2.0f;
         else speed = 1.0f;
         player.setPlaybackSpeed(speed);
-        adapter.setSpeed(speed);
+        Toast.makeText(this, "播放倍速: " + speed + "x", Toast.LENGTH_SHORT).show();
     }
 
-    @Override
-    public void onDownloadVideo(VideoItem item) {
-        if (item.videoUrl.isEmpty()) {
-            Toast.makeText(this, "未找到视频地址", Toast.LENGTH_SHORT).show();
-            return;
+    private void copyText(String text) {
+        if (text == null || text.isEmpty()) return;
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(ClipData.newPlainText("DouyinLite", text));
+            Toast.makeText(this, "已复制直链", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void downloadVideo(VideoItem item) {
+        if (item.videoUrl.isEmpty()) return;
         Toast.makeText(this, "开始保存视频...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
@@ -257,13 +438,9 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         }).start();
     }
 
-    @Override
-    public void onDownloadAudio(VideoItem item) {
+    private void downloadAudio(VideoItem item) {
         String url = !item.audioUrl.isEmpty() ? item.audioUrl : item.videoUrl;
-        if (url.isEmpty()) {
-            Toast.makeText(this, "未找到音频地址", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        if (url.isEmpty()) return;
         Toast.makeText(this, "开始提取音频...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
@@ -277,33 +454,15 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         }).start();
     }
 
-    @Override
-    public void onOpenComments(VideoItem item) {
-        if (item.awemeId.isEmpty()) return;
-        Toast.makeText(this, "加载评论中...", Toast.LENGTH_SHORT).show();
-        String js = "window.__dylFetchComments && window.__dylFetchComments('" + item.awemeId + "')";
-        bridgeWebView.evaluateJavascript(js, null);
-    }
-
-    @Override
-    public void onLike(VideoItem item, TextView tv) {
-        item.isDigged = !item.isDigged;
-        item.diggCount += item.isDigged ? 1 : -1;
-        adapter.notifyItemChanged(currentPos);
-        String js = "window.__dylDigg && window.__dylDigg('" + item.awemeId + "'," + (item.isDigged ? 1 : 0) + ")";
-        bridgeWebView.evaluateJavascript(js, null);
-    }
-
     private void showSearchDialog() {
         EditText input = new EditText(this);
         input.setHint("输入关键词搜索视频...");
-        new AlertDialog.Builder(this)
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("搜索")
                 .setView(input)
                 .setPositiveButton("搜索", (d, w) -> {
                     String kw = input.getText().toString().trim();
                     if (!kw.isEmpty()) {
-                        statusBanner.setText("搜索: " + kw);
                         String safe = kw.replace("'", "\\'");
                         bridgeWebView.evaluateJavascript("window.__dylSearch && window.__dylSearch('" + safe + "')", null);
                     }
@@ -312,21 +471,30 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
                 .show();
     }
 
-    private TextView makeTopPill(String text) {
+    private TextView makeTopIcon(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextColor(Color.WHITE);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.argb(130, 20, 22, 28));
-        bg.setCornerRadius(dp(16));
-        bg.setStroke(1, Color.argb(45, 255, 255, 255));
-        tv.setBackground(bg);
-        tv.setPadding(dp(10), dp(6), dp(10), dp(6));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.leftMargin = dp(6);
-        tv.setLayoutParams(lp);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
+        tv.setPadding(dp(8), dp(4), dp(8), dp(4));
+        return tv;
+    }
+
+    private TextView makeTopTab(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(Color.WHITE);
+        tv.setPadding(dp(12), dp(4), dp(12), dp(4));
+        return tv;
+    }
+
+    private TextView makeBottomNav(String text, boolean active) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setGravity(Gravity.CENTER);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        tv.setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        tv.setTextColor(active ? Color.WHITE : Color.argb(150, 255, 255, 255));
         return tv;
     }
 
@@ -354,6 +522,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
 
     @Override
     protected void onDestroy() {
+        uiHandler.removeCallbacks(progressTick);
         if (player != null) player.release();
         if (bridgeWebView != null) bridgeWebView.destroy();
         super.onDestroy();
@@ -390,7 +559,6 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
                         viewPager.post(() -> attachAndPlay(0));
                     }
                 }
-                statusBanner.setText("精选 · " + adapter.getItemCount() + " 条");
             });
         }
 
@@ -407,21 +575,16 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
                             if (c == null) continue;
                             JSONObject u = c.optJSONObject("user");
                             String nick = u != null ? u.optString("nickname", "用户") : "用户";
-                            sb.append(nick).append(": ").append(c.optString("text", "")).append("\n\n");
+                            sb.append(nick).append("：").append(c.optString("text", "")).append("\n\n");
                         }
                     }
                 } catch (Exception ignored) {}
-                new AlertDialog.Builder(MainActivity.this)
+                new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                         .setTitle("评论区")
                         .setMessage(sb.length() > 0 ? sb.toString() : "暂无评论或需要登录后查看")
                         .setPositiveButton("关闭", null)
                         .show();
             });
-        }
-
-        @JavascriptInterface
-        public void onStatus(String msg) {
-            runOnUiThread(() -> statusBanner.setText(msg));
         }
     }
 }
