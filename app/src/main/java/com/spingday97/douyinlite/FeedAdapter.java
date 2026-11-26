@@ -43,9 +43,8 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
         void onLike(VideoItem item, int pos);
         void onOpenComments(VideoItem item);
         void onCollect(VideoItem item, int pos);
-        void onFollow(VideoItem item, int pos);
-        void onShare(VideoItem item);
-        void onUserProfile(VideoItem item);
+        void onToggleCleanScreen();
+        void onOpenMoreSheet(VideoItem item);
     }
 
     private static final ExecutorService IMG_EXECUTOR = Executors.newFixedThreadPool(4);
@@ -53,7 +52,8 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
 
     private final List<VideoItem> items = new ArrayList<>();
     private final ActionListener listener;
-
+    private boolean cleanScreen = false;
+    
     public FeedAdapter(ActionListener listener) {
         this.listener = listener;
     }
@@ -67,7 +67,11 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
     public void updateItemAt(int pos) {
         if (pos >= 0 && pos < items.size()) notifyItemChanged(pos);
     }
-
+    public VideoItem getItem(int pos) { return (pos >= 0 && pos < items.size()) ? items.get(pos) : null; }
+    public void setCleanScreen(boolean clean) { this.cleanScreen = clean; notifyDataSetChanged(); }
+    public void replaceItems(List<VideoItem> list) { setItems(list); }
+    public void addItems(List<VideoItem> list) { if (list == null || list.isEmpty()) return; int start = items.size(); items.addAll(list); notifyItemRangeInserted(start, list.size()); }
+    
     @NonNull
     @Override
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -253,7 +257,7 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
 
         return new VH(root, pv, imagePager, imageBadge, pauseIcon, avatarCircle, followBadge,
                 likeIcon, likeCount, commentIcon, commentCount, collectIcon, collectCount,
-                shareIcon, discView, authorTv, descTv, musicTv, seekBar);
+                shareIcon, discView, authorTv, descTv, musicTv, seekBar, rightBar, bottomBar);
     }
 
     @Override
@@ -302,14 +306,16 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
 
         h.pauseIcon.setVisibility(View.GONE);
         h.seekBar.setProgress(0);
-
+        int uiVis = cleanScreen ? View.GONE : View.VISIBLE;
+        h.rightBar.setVisibility(uiVis);
+        h.bottomBar.setVisibility(uiVis);
+        
         h.itemView.setOnClickListener(v -> listener.onTogglePlay(h));
-        h.avatarCircle.setOnClickListener(v -> listener.onUserProfile(item));
-        h.followBadge.setOnClickListener(v -> listener.onFollow(item, h.getBindingAdapterPosition()));
+        h.itemView.setOnLongClickListener(v -> { listener.onToggleCleanScreen(); return true; });
         h.likeIcon.setOnClickListener(v -> listener.onLike(item, h.getBindingAdapterPosition()));
         h.commentIcon.setOnClickListener(v -> listener.onOpenComments(item));
         h.collectIcon.setOnClickListener(v -> listener.onCollect(item, h.getBindingAdapterPosition()));
-        h.shareIcon.setOnClickListener(v -> listener.onShare(item));
+        h.shareIcon.setOnClickListener(v -> listener.onOpenMoreSheet(item));
 
         if (h.discAnim == null) {
             h.discAnim = ObjectAnimator.ofFloat(h.discView, "rotation", 0f, 360f);
@@ -445,7 +451,7 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
         public final TextView descTv;
         public final TextView musicTv;
         public final ProgressBar seekBar;
-        public ObjectAnimator discAnim;
+        public ObjectAnimator discAnim; public final ProgressBar progressBar; public final LinearLayout rightBar; public final LinearLayout bottomBar;
         public ViewPager2.OnPageChangeCallback pageChangeCallback;
         public int boundPosition = -1;
 
@@ -453,7 +459,7 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
                   TextView pauseIcon, TextView avatarCircle, TextView followBadge,
                   TextView likeIcon, TextView likeCount, TextView commentIcon, TextView commentCount,
                   TextView collectIcon, TextView collectCount, TextView shareIcon, TextView discView,
-                  TextView authorTv, TextView descTv, TextView musicTv, ProgressBar seekBar) {
+                  TextView authorTv, TextView descTv, TextView musicTv, ProgressBar seekBar, LinearLayout rightBar, LinearLayout bottomBar) {
             super(itemView);
             this.playerView = playerView;
             this.imagePager = imagePager;
@@ -472,7 +478,7 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
             this.authorTv = authorTv;
             this.descTv = descTv;
             this.musicTv = musicTv;
-            this.seekBar = seekBar;
+            this.seekBar = seekBar; this.progressBar = seekBar; this.rightBar = rightBar; this.bottomBar = bottomBar;
         }
     }
 }
