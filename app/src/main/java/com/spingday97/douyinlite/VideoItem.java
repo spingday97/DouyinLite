@@ -11,6 +11,7 @@ public class VideoItem {
     public String desc = "";
     public String authorName = "";
     public String authorUid = "";
+    public String authorSecUid = "";
     public String musicTitle = "";
     public String videoUrl = "";
     public String audioUrl = "";
@@ -48,6 +49,7 @@ public class VideoItem {
                 if (author != null) {
                     item.authorName = author.optString("nickname", "");
                     item.authorUid = author.optString("uid", "");
+                    item.authorSecUid = author.optString("sec_uid", "");
                     item.isFollowed = author.optInt("follow_status", 0) > 0;
                 }
 
@@ -64,6 +66,9 @@ public class VideoItem {
                         JSONObject imgObj = images.optJSONObject(j);
                         if (imgObj == null) continue;
                         JSONArray uList = imgObj.optJSONArray("url_list");
+                    if (uList == null || uList.length() == 0) {
+                        uList = imgObj.optJSONArray("download_url_list");
+                    }
                         if (uList != null && uList.length() > 0) {
                             String imgUrl = uList.optString(0, "");
                             if (!imgUrl.isEmpty()) item.imageUrls.add(imgUrl);
@@ -105,5 +110,47 @@ public class VideoItem {
         } catch (Exception ignored) {
         }
         return list;
+    }
+
+    public JSONObject toHistoryJson() {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("awemeId", awemeId);
+            o.put("desc", desc);
+            o.put("authorName", authorName);
+            o.put("authorUid", authorUid);
+            o.put("authorSecUid", authorSecUid);
+            o.put("musicTitle", musicTitle);
+            o.put("videoUrl", videoUrl);
+            o.put("audioUrl", audioUrl);
+            JSONArray imgs = new JSONArray();
+            for (String u : imageUrls) {
+                imgs.put(u);
+            }
+            o.put("imageUrls", imgs);
+        } catch (Exception ignored) {
+        }
+        return o;
+    }
+
+    public static VideoItem fromHistoryJson(JSONObject o) {
+        VideoItem item = new VideoItem();
+        if (o == null) return item;
+        item.awemeId = o.optString("awemeId", "");
+        item.desc = o.optString("desc", "");
+        item.authorName = o.optString("authorName", "");
+        item.authorUid = o.optString("authorUid", "");
+        item.authorSecUid = o.optString("authorSecUid", "");
+        item.musicTitle = o.optString("musicTitle", "");
+        item.videoUrl = o.optString("videoUrl", "");
+        item.audioUrl = o.optString("audioUrl", "");
+        JSONArray imgs = o.optJSONArray("imageUrls");
+        if (imgs != null) {
+            for (int i = 0; i < imgs.length(); i++) {
+                String u = imgs.optString(i, "");
+                if (!u.isEmpty()) item.imageUrls.add(u);
+            }
+        }
+        return item;
     }
 }
