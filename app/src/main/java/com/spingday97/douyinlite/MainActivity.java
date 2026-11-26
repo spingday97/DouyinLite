@@ -119,7 +119,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         btnSearch.setOnClickListener(v -> showSearchDialog());
         btnRefresh.setOnClickListener(v -> {
             statusBanner.setText("刷新中...");
-            bridgeWebView.loadUrl(DouyinApi.JINGXUAN_URL);
+            bridgeWebView.loadUrl("https://www.douyin.com/jingxuan");
         });
         btnLogin.setOnClickListener(v -> toggleWebLogin(true));
 
@@ -181,7 +181,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         closeLp.setMargins(0, dp(36), dp(14), 0);
         webContainer.addView(closeWeb, closeLp);
 
-        bridgeWebView.loadUrl(DouyinApi.JINGXUAN_URL);
+        bridgeWebView.loadUrl("https://www.douyin.com/jingxuan");
     }
 
     private void toggleWebLogin(boolean show) {
