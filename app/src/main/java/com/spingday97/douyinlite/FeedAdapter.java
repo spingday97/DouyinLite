@@ -11,6 +11,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.util.TypedValue;
+import android.util.LruCache;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -40,15 +43,26 @@ import java.util.concurrent.Executors;
 public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
     public interface ActionListener {
         void onTogglePlay(VH holder);
+void onTempSpeed(boolean active);
+void onSeekPercent(float percent);
         void onLike(VideoItem item, int pos);
         void onOpenComments(VideoItem item);
         void onCollect(VideoItem item, int pos);
+        void onFollow(VideoItem item, int pos);
+        void onUserProfile(VideoItem item);
         void onToggleCleanScreen();
         void onOpenMoreSheet(VideoItem item);
     }
 
     private static final ExecutorService IMG_EXECUTOR = Executors.newFixedThreadPool(4);
     private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
+    private static final int IMG_CACHE_BYTES = 24 * 1024 * 1024;
+    private static final LruCache<String, Bitmap> IMG_CACHE = new LruCache<String, Bitmap>(IMG_CACHE_BYTES) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value != null ? value.getByteCount() : 0;
+        }
+    };
 
     private final List<VideoItem> items = new ArrayList<>();
     private final ActionListener listener;
@@ -253,11 +267,14 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
         FrameLayout.LayoutParams sbLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 2), Gravity.BOTTOM);
         sbLp.bottomMargin = dp(ctx, 2);
-        root.addView(seekBar, sbLp);
-
+        FrameLayout seekTouchArea = new FrameLayout(ctx);
+        FrameLayout.LayoutParams staLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 24), Gravity.BOTTOM);
+        seekTouchArea.addView(seekBar, sbLp);
+        root.addView(seekTouchArea, staLp);
         return new VH(root, pv, imagePager, imageBadge, pauseIcon, avatarCircle, followBadge,
                 likeIcon, likeCount, commentIcon, commentCount, collectIcon, collectCount,
-                shareIcon, discView, authorTv, descTv, musicTv, seekBar, rightBar, bottomBar);
+                shareIcon, discView, authorTv, descTv, musicTv, seekTouchArea, seekBar, rightBar, bottomBar);
     }
 
     @Override
@@ -309,9 +326,71 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
         int uiVis = cleanScreen ? View.GONE : View.VISIBLE;
         h.rightBar.setVisibility(uiVis);
         h.bottomBar.setVisibility(uiVis);
-        
-        h.itemView.setOnClickListener(v -> listener.onTogglePlay(h));
-        h.itemView.setOnLongClickListener(v -> { listener.onToggleCleanScreen(); return true; });
+                final boolean[] tempSpeedActive = {false};
+        GestureDetector gestureDetector = new GestureDetector(h.itemView.getContext(),
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override
+                    public boolean onDown(@NonNull MotionEvent e) {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
+                        if (listener != null) listener.onTogglePlay(h);
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onDoubleTap(@NonNull MotionEvent e) {
+                        int p = h.getBindingAdapterPosition();
+                        if (p == RecyclerView.NO_POSITION) p = position;
+                        if (listener != null && !item.isDigged) {
+                            listener.onLike(item, p);
+                        }
+                        return true;
+                    }
+
+                    @Override
+                    public void onLongPress(@NonNull MotionEvent e) {
+                        tempSpeedActive[0] = true;
+                        if (listener != null) listener.onTempSpeed(true);
+                    }
+                });
+        h.playerView.setOnTouchListener((v, event) -> {
+            boolean handled = gestureDetector.onTouchEvent(event);
+            int action = event.getActionMasked();
+            if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) && tempSpeedActive[0]) {
+                tempSpeedActive[0] = false;
+                if (listener != null) listener.onTempSpeed(false);
+            }
+            return handled || action == MotionEvent.ACTION_DOWN;
+        });
+        h.seekTouchArea.setOnTouchListener((v, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
+                if (v.getParent() != null) {
+                    v.getParent().requestDisallowInterceptTouchEvent(action != MotionEvent.ACTION_UP);
+                }
+                int w = v.getWidth();
+                if (w > 0) {
+                    float percent = Math.max(0f, Math.min(1f, event.getX() / w));
+                    h.seekBar.setProgress(Math.round(percent * h.seekBar.getMax()));
+                    if (listener != null) {
+                        listener.onSeekPercent(percent);
+                    }
+                }
+                return true;
+            }
+            return false;
+        });
+        h.avatarCircle.setOnClickListener(v -> {
+            if (listener != null) listener.onUserProfile(item);
+        });
+        h.followBadge.setOnClickListener(v -> {
+            int p = h.getBindingAdapterPosition();
+            if (p == RecyclerView.NO_POSITION) p = position;
+            if (listener != null) listener.onFollow(item, p);
+        });
         h.likeIcon.setOnClickListener(v -> listener.onLike(item, h.getBindingAdapterPosition()));
         h.commentIcon.setOnClickListener(v -> listener.onOpenComments(item));
         h.collectIcon.setOnClickListener(v -> listener.onCollect(item, h.getBindingAdapterPosition()));
@@ -390,6 +469,17 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
             String url = urls.get(position);
             holder.imageView.setImageBitmap(null);
             holder.imageView.setTag(url);
+            if (url == null || url.isEmpty()) {
+                holder.imageView.setBackgroundColor(0xFF222222);
+                return;
+            }
+            Bitmap cached = IMG_CACHE.get(url);
+            if (cached != null && !cached.isRecycled()) {
+                holder.imageView.setBackgroundColor(Color.BLACK);
+                holder.imageView.setImageBitmap(cached);
+                return;
+            }
+            holder.imageView.setBackgroundColor(Color.BLACK);
             IMG_EXECUTOR.execute(() -> {
                 Bitmap bmp = null;
                 HttpURLConnection conn = null;
@@ -398,10 +488,13 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
                     conn.setConnectTimeout(8000);
                     conn.setReadTimeout(8000);
                     conn.setInstanceFollowRedirects(true);
+                    conn.setRequestProperty("User-Agent", MediaDownloadHelper.DESKTOP_UA);
+                    conn.setRequestProperty("Referer", "https://www.douyin.com/");
                     conn.connect();
                     if (conn.getResponseCode() == HttpURLConnection.HTTP_OK) {
                         try (InputStream is = conn.getInputStream()) {
-                            bmp = BitmapFactory.decodeStream(is);
+                            bmp = BitmapFactory.decodeStream(is)
+                            if (bmp != null) IMG_CACHE.put(url, bmp);;
                         }
                     }
                 } catch (Exception ignored) {
@@ -412,6 +505,9 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
                 MAIN_HANDLER.post(() -> {
                     if (url.equals(holder.imageView.getTag()) && finalBmp != null) {
                         holder.imageView.setImageBitmap(finalBmp);
+                    } else if (url.equals(holder.imageView.getTag())) {
+                    holder.imageView.setImageBitmap(null);
+                    holder.imageView.setBackgroundColor(0xFF222222);
                     }
                 });
             });
@@ -451,6 +547,7 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
         public final TextView descTv;
         public final TextView musicTv;
         public final ProgressBar seekBar;
+        public final FrameLayout seekTouchArea;
         public ObjectAnimator discAnim; public final ProgressBar progressBar; public final LinearLayout rightBar; public final LinearLayout bottomBar;
         public ViewPager2.OnPageChangeCallback pageChangeCallback;
         public int boundPosition = -1;
@@ -459,7 +556,7 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
                   TextView pauseIcon, TextView avatarCircle, TextView followBadge,
                   TextView likeIcon, TextView likeCount, TextView commentIcon, TextView commentCount,
                   TextView collectIcon, TextView collectCount, TextView shareIcon, TextView discView,
-                  TextView authorTv, TextView descTv, TextView musicTv, ProgressBar seekBar, LinearLayout rightBar, LinearLayout bottomBar) {
+                  TextView authorTv, TextView descTv, TextView musicTv, FrameLayout seekTouchArea, ProgressBar seekBar, LinearLayout rightBar, LinearLayout bottomBar) {
             super(itemView);
             this.playerView = playerView;
             this.imagePager = imagePager;
@@ -478,6 +575,7 @@ public class FeedAdapter extends RecyclerView.Adapter<FeedAdapter.VH> {
             this.authorTv = authorTv;
             this.descTv = descTv;
             this.musicTv = musicTv;
+            this.seekTouchArea = seekTouchArea;
             this.seekBar = seekBar; this.progressBar = seekBar; this.rightBar = rightBar; this.bottomBar = bottomBar;
         }
     }
