@@ -239,7 +239,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
 
         cachedJs = readAsset("douyin_lite.js");
         bridgeWebView.addJavascriptInterface(new Bridge(), "DouyinLiteBridge");
-        bridgeWebView.setWebChromeClient(new WebChromeClient() { @Override public void onProgressChanged(WebView view, int newProgress) { super.onProgressChanged(view, newProgress); if (newProgress >= 10 && cachedJs != null) { view.evaluateJavascript(cachedJs, null); } } }));
+        bridgeWebView.setWebChromeClient(new WebChromeClient() { @Override public void onProgressChanged(WebView view, int newProgress) { super.onProgressChanged(view, newProgress); if (newProgress >= 10 && cachedJs != null) { view.evaluateJavascript(cachedJs, null); } } });
         bridgeWebView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -497,8 +497,10 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
             return sb.toString();
         } catch (Exception e) {
             return "";
-        }    private void appendDebugLog(String msg) { synchronized (debugLogs) { debugLogs.append(msg).append('\n'); if (debugLogs.length() > 4000) debugLogs.delete(0, debugLogs.length() - 4000); } }
+        }
     }
+
+    private void appendDebugLog(String msg) { synchronized (debugLogs) { debugLogs.append(msg).append('\n'); if (debugLogs.length() > 4000) debugLogs.delete(0, debugLogs.length() - 4000); } }
 
     private int dp(int val) {
         return (int) (val * getResources().getDisplayMetrics().density);
