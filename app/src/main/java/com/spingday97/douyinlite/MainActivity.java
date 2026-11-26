@@ -6,6 +6,7 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -208,7 +209,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
             Toast.makeText(this, "加载新推荐...", Toast.LENGTH_SHORT).show();
             bridgeWebView.loadUrl(DOUYIN_HOME);
         });
-        navMe.setOnClickListener(v -> toggleWebLogin(true));
+        navMe.setOnClickListener(v -> DouyinExtras.showMeMenuDialog(this, new DouyinExtras.MeCallback() { @Override public void onWebLogin() { toggleWebLogin(true); } @Override public void onReloadFeed() { bridgeWebView.loadUrl(DOUYIN_HOME); } @Override public void onFetchMyList(String kind) { bridgeWebView.evaluateJavascript("window.__dylFetchMyList && window.__dylFetchMyList('" + kind + "')", null); } @Override public void onClearCache() { bridgeWebView.clearCache(true); DouyinExtras.clearDir(getCacheDir()); Toast.makeText(MainActivity.this, "缓存已清理", Toast.LENGTH_SHORT).show(); } @Override public void onPlayList(java.util.List<VideoItem> items) { adapter.replaceItems(items); viewPager.setCurrentItem(0, false); attachAndPlay(0); } }));
 
         for (TextView tv : new TextView[]{navHome, navFriend, navPlus, navMsg, navMe}) {
             bottomBar.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -246,13 +247,14 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
                 return !(url.startsWith("http://") || url.startsWith("https://"));
             }
 
+                       @Override public void onPageStarted(WebView view, String url, Bitmap favicon) { super.onPageStarted(view, url, favicon); if (cachedJs != null && !cachedJs.isEmpty()) { view.evaluateJavascript(cachedJs, null); } }
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 CookieManager.getInstance().flush();
                 if (cachedJs != null && !cachedJs.isEmpty()) {
                     view.evaluateJavascript(cachedJs, null);
-                }
+                } view.evaluateJavascript("window.__dylTrySsr && window.__dylTrySsr()", null); uiHandler.postDelayed(() -> { if (adapter.getItemCount() == 0) bridgeWebView.evaluateJavascript("window.__dylFetchRecommend && window.__dylFetchRecommend(true)", null); }, 2500);
             }
         });
         webContainer.addView(bridgeWebView, new FrameLayout.LayoutParams(
@@ -319,7 +321,7 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
 
     private void attachAndPlay(int position) {
         VideoItem item = adapter.getItem(position);
-        if (item == null) return;
+        if (item == null) return; DouyinExtras.recordWatchHistory(this, item);
         RecyclerView rv = (RecyclerView) viewPager.getChildAt(0);
         RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(position);
         if (vh instanceof FeedAdapter.VH holder) {
@@ -375,7 +377,8 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         bridgeWebView.evaluateJavascript(
                 "window.__dylFetchComments && window.__dylFetchComments('" + item.awemeId + "')", null);
     }
-
+    @Override public void onTempSpeed(boolean active) { if (player != null) player.setPlaybackSpeed(active ? 2.0f : speed); if (active) Toast.makeText(this, "倍速播放中 2.0x", Toast.LENGTH_SHORT).show(); } @Override public void onSeekPercent(float percent) { if (player != null && player.getDuration() > 0) player.seekTo((long) (player.getDuration() * percent)); } @Override public void onFollow(VideoItem item, int pos) { item.isFollowed = !item.isFollowed; adapter.notifyItemChanged(pos); bridgeWebView.evaluateJavascript("window.__dylFollow && window.__dylFollow('" + item.authorUid + "','" + item.authorSecUid + "'," + (item.isFollowed ? 1 : 0) + ")", null); } @Override public void onUserProfile(VideoItem item) { if (item.authorSecUid.isEmpty()) return; Toast.makeText(this, "加载作者作品...", Toast.LENGTH_SHORT).show(); bridgeWebView.evaluateJavascript("window.__dylFetchUserPosts && window.__dylFetchUserPosts('" + item.authorSecUid + "')", null); }
+    
     @Override
     public void onOpenMoreSheet(VideoItem item) {
         String[] options = {
@@ -456,22 +459,9 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
 
     private void showSearchDialog() {
         EditText input = new EditText(this);
-        input.setHint("输入关键词搜索视频...");
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("搜索")
-                .setView(input)
-                .setPositiveButton("搜索", (d, w) -> {
-                    String kw = input.getText().toString().trim();
-                    if (!kw.isEmpty()) {
-                        String safe = kw.replace("'", "\\'");
-                        bridgeWebView.evaluateJavascript("window.__dylSearch && window.__dylSearch('" + safe + "')", null);
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    private TextView makeTopIcon(String text) {
+       
+          input.setHint("输入关键词搜索视频..."); android.widget.LinearLayout box = new android.widget.LinearLayout(this); box.setOrientation(android.widget.LinearLayout.VERTICAL); box.setPadding(dp(16), dp(8), dp(16), dp(8)); box.addView(input); final int[] sortType = {0}; android.widget.RadioGroup rg = new android.widget.RadioGroup(this); rg.setOrientation(android.widget.RadioGroup.HORIZONTAL); String[] labels = {"综合", "最新发布", "最多点赞"}; int[] vals = {0, 2, 1}; for (int i = 0; i < labels.length; i++) { android.widget.RadioButton rb = new android.widget.RadioButton(this); rb.setText(labels[i]); rb.setId(i + 100); final int v = vals[i]; if (i == 0) rb.setChecked(true); rb.setOnClickListener(x -> sortType[0] = v); rg.addView(rb); } box.addView(rg); new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle("搜索").setView(box).setPositiveButton("搜索", (d, w) -> { String kw = input.getText().toString().trim(); if (!kw.isEmpty()) { String safe = kw.replace("'", "\\'"); bridgeWebView.evaluateJavascript("window.__dylSearch && window.__dylSearch('" + safe + "', " + sortType[0] + ")", null); } }).setNegativeButton("取消", null).show(); }
+        private TextView makeTopIcon(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextColor(Color.WHITE);
@@ -566,25 +556,10 @@ public class MainActivity extends Activity implements FeedAdapter.ActionListener
         public void onCommentsJson(String json) {
             runOnUiThread(() -> {
                 StringBuilder sb = new StringBuilder();
-                try {
-                    JSONObject root = new JSONObject(json);
-                    JSONArray arr = root.optJSONArray("comments");
-                    if (arr != null) {
-                        for (int i = 0; i < Math.min(arr.length(), 25); i++) {
-                            JSONObject c = arr.optJSONObject(i);
-                            if (c == null) continue;
-                            JSONObject u = c.optJSONObject("user");
-                            String nick = u != null ? u.optString("nickname", "用户") : "用户";
-                            sb.append(nick).append("：").append(c.optString("text", "")).append("\n\n");
-                        }
-                    }
-                } catch (Exception ignored) {}
-                new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                        .setTitle("评论区")
-                        .setMessage(sb.length() > 0 ? sb.toString() : "暂无评论或需要登录后查看")
+               new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle("评论区").setMessage(DouyinExtras.formatComments(json))
                         .setPositiveButton("关闭", null)
                         .show();
             });
-        }
+        } @JavascriptInterface public void onProfilePostsJson(String json) { List<VideoItem> parsed = VideoItem.parseFeedJson(json); runOnUiThread(() -> DouyinExtras.showVideoListDialog(MainActivity.this, "作品列表", parsed, reordered -> { adapter.replaceItems(reordered); viewPager.setCurrentItem(0, false); attachAndPlay(0); })); }
     }
 }
