@@ -2,6 +2,16 @@
   if (window.__douyinLiteBridgeLoaded) return;
   window.__douyinLiteBridgeLoaded = true;
 
+  function isFeedUrl(url) {
+    if (!url) return false;
+    return (
+      url.indexOf('/aweme/v1/web/tab/feed') !== -1 ||
+      url.indexOf('/aweme/v1/web/familiar/feed') !== -1 ||
+      url.indexOf('/aweme/v1/web/follow/feed') !== -1 ||
+      url.indexOf('/aweme/v1/web/search/item') !== -1
+    );
+  }
+
   function forwardIfFeed(text, replace) {
     if (!text || text.indexOf('"aweme_list"') === -1) return;
     if (window.DouyinLiteBridge && DouyinLiteBridge.onFeedJson) {
@@ -16,7 +26,7 @@
       var url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
       return origFetch.apply(this, args).then(function (resp) {
         try {
-          if (url.indexOf('/aweme/v1/web/') !== -1) {
+          if (isFeedUrl(url)) {
             resp.clone().text().then(function (txt) {
               forwardIfFeed(txt, url.indexOf('/search/') !== -1);
             });
@@ -37,7 +47,7 @@
     this.addEventListener('load', function () {
       try {
         var u = this.__dylUrl || '';
-        if (u.indexOf('/aweme/v1/web/') !== -1 && typeof this.responseText === 'string') {
+        if (isFeedUrl(u) && typeof this.responseText === 'string') {
           forwardIfFeed(this.responseText, u.indexOf('/search/') !== -1);
         }
       } catch (e) {}
