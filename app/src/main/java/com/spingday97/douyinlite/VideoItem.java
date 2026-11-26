@@ -29,16 +29,18 @@ public class VideoItem {
         try {
             JSONObject root = new JSONObject(jsonStr);
             JSONArray arr = root.optJSONArray("aweme_list");
-            if (arr == null) {
+            if (arr == null || arr.length() == 0) {
                 JSONObject data = root.optJSONObject("data");
                 if (data != null) arr = data.optJSONArray("aweme_list");
             }
+            if (arr == null || arr.length() == 0) arr = root.optJSONArray("data");
             if (arr == null) return list;
 
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.optJSONObject(i);
                 if (obj == null) continue;
-
+JSONObject awemeInfo = obj.optJSONObject("aweme_info");
+               if (awemeInfo != null) obj = awemeInfo; 
                 VideoItem item = new VideoItem();
                 item.awemeId = obj.optString("aweme_id", "");
                 item.desc = obj.optString("desc", "");
@@ -82,9 +84,13 @@ public class VideoItem {
                     if (playAddr != null) {
                         JSONArray urls = playAddr.optJSONArray("url_list");
                         if (urls != null && urls.length() > 0) {
-                            item.videoUrl = urls.optString(0, "");
+                            item.videoUrl = pickBestUrl(urls); // item.videoUrl = urls.optString(0, "");
                         }
                     }
+               JSONArray br = item.videoUrl.isEmpty() ? video.optJSONArray("bit_rate") : null;
+               JSONObject b0 = (br != null && br.length() > 0) ? br.optJSONObject(0) : null;
+               JSONObject bpa = b0 != null ? b0.optJSONObject("play_addr") : null;
+               if (bpa != null) item.videoUrl = pickBestUrl(bpa.optJSONArray("url_list"));
                 }
 
                 JSONObject music = obj.optJSONObject("music");
@@ -112,6 +118,11 @@ public class VideoItem {
         return list;
     }
 
+    private static String pickBestUrl(JSONArray urls) {
+       if (urls == null || urls.length() == 0) return "";
+       for (int i = 0; i < urls.length(); i++) if (urls.optString(i, "").startsWith("https://")) return urls.optString(i, "");
+       return urls.optString(0, "");
+    }
     public JSONObject toHistoryJson() {
         JSONObject o = new JSONObject();
         try {
